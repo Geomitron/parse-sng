@@ -1,6 +1,6 @@
 {
   "name": "parse-sng",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "description": "A library that parses the .sng file format.",
   "author": "Geo",
   "license": "MIT",
