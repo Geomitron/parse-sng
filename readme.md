@@ -65,10 +65,19 @@ class SngStream {
     on(event: 'file', listener: (fileName: string, fileStream: Readable) => void): void
 
     /**
-     * Registers `listener` to be called when the .sng file has been fully streamed
-     * from `sngStream`.
+     * Registers `listener` to be called after the .sng header has been parsed.
+     * An array of `Readable` streams is `listener`, along with each `fileName`.
+     * The streams are for the (unmasked) binary contents of the files.
      *
-     * This event is emitted after the `end` events of any `fileStream` streams.
+     * If a listener for the `file` event is registered, this event will not fire.
+     */
+    on(event: 'files', listener: (files: { fileName: string, fileStream: Readable }[]) => void): void
+
+    /**
+     * Registers `listener` to be called when the .sng file has been fully streamed
+     * during the `file` or `files` events.
+     *
+     * This event is emitted after the `end` event of the last `fileStream`.
      */
     on(event: 'end', listener: () => void): void
 
@@ -88,7 +97,7 @@ class SngStream {
 import { createReadStream } from 'fs'
 import { SngStream } from 'parse-sng'
 
-const sngStream = new SngStream(createReadStream('C:/dev/test.sng'))
+const sngStream = new SngStream((start, end) => createReadStream('C:/dev/test.sng', { start: Number(start), end: Number(end) || undefined }))
 
 sngStream.on('header', header => {
     console.log('Header:', header)
