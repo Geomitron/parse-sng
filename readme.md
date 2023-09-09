@@ -44,7 +44,14 @@ function readSngFile(header: SngHeader, sngBuffer: Buffer, filename: string): Bu
  */
 class SngStream {
 
-    constructor(sngStream: Readable) { }
+    constructor(
+        /**
+         * @returns a `Readable` stream for the portion of the file between `byteStart` (inclusive) and `byteEnd` (inclusive).
+         * If `byteEnd` is not specified, it should default to `Infinity` or `undefined`.
+         * This may be called multiple times to create multiple concurrent streams.
+         */
+        getSngStream: (byteStart: bigint, byteEnd?: bigint) => Readable
+    ) { }
 
     /**
      * Registers `listener` to be called when the .sng header has been parsed.

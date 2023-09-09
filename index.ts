@@ -151,7 +151,8 @@ export class SngStream {
   constructor(
     /**
      * @returns a `Readable` stream for the portion of the file between `byteStart` (inclusive) and `byteEnd` (inclusive).
-     * If `byteEnd` is not specified, it should default to `Infinity`. This may be called multiple times to create multiple concurrent streams.
+     * If `byteEnd` is not specified, it should default to `Infinity` or `undefined`.
+     * This may be called multiple times to create multiple concurrent streams.
      */
     private getSngStream: (byteStart: bigint, byteEnd?: bigint) => Readable
   ) {
