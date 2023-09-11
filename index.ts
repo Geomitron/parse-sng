@@ -1,6 +1,6 @@
 import * as binaryParser from 'binary-parser'
 import EventEmitter from 'events'
-import { Readable, Transform } from 'stream'
+import { Readable, Transform } from 'readable-stream'
 
 export interface SngHeader {
   fileIdentifier: string
@@ -266,7 +266,7 @@ export class SngStream {
         }
       },
       flush: function(callback) {
-        that.sngStream.unpipe(this)
+        that.sngStream.unpipe(this as any)
         that.sngStream.pause()
         callback()
       }
