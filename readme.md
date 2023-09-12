@@ -1,5 +1,7 @@
 `.sng` is a simple and generic binary container format that groups a list of files and metadata into a single file. The file format specification can be found here: https://github.com/mdsitton/SngFileFormat
 
+Works in a browser context and Node.js v17.0.0 and later.
+
 # API
 This package provides two ways to parse .sng files:
 
@@ -46,12 +48,17 @@ class SngStream {
 
     constructor(
         /**
-         * @returns a `Readable` stream for the portion of the file between `byteStart` (inclusive) and `byteEnd` (inclusive).
+         * @returns a `ReadableStream` for the portion of the file between `byteStart` (inclusive) and `byteEnd` (inclusive).
          * If `byteEnd` is not specified, it should default to `Infinity` or `undefined`.
          * This may be called multiple times to create multiple concurrent streams.
          */
-        getSngStream: (byteStart: bigint, byteEnd?: bigint) => Readable
+        getSngStream: (byteStart: bigint, byteEnd?: bigint) => ReadableStream<Uint8Array>
     ) { }
+
+    /**
+     * Starts processing the provided .sng stream. Event listeners should be attached before calling this.
+     */
+    start(): Promise<void>
 
     /**
      * Registers `listener` to be called when the .sng header has been parsed.
@@ -63,22 +70,33 @@ class SngStream {
 
     /**
      * Registers `listener` to be called when each file in .sng has started to parse.
-     * The `fileName` is passed to `listener`, along with a `Readable` stream
+     * The `fileName` is passed to `listener`, along with a `ReadableStream`
      * for the (unmasked) binary contents of the file.
      *
      * `fileStream` will emit its `end` event before `listener` is called again
      * with the next file.
+     *
+     * Note: using this event will only cause `getSngStream()` to be called once.
+     * Handling `byteStart` and `byteEnd` is not necessary.
+     *
+     * Cancelling `fileStream` will prevent any more `file` events from emitting.
+     * The source stream is canceled, and the `end` event fires.
      */
-    on(event: 'file', listener: (fileName: string, fileStream: Readable) => void): void
+    on(event: 'file', listener: (fileName: string, fileStream: ReadableStream<Uint8Array>) => void): void
 
     /**
      * Registers `listener` to be called after the .sng header has been parsed.
-     * An array of `Readable` streams is `listener`, along with each `fileName`.
+     * An array of `ReadableStream`s is `listener`, along with each `fileName`.
      * The streams are for the (unmasked) binary contents of the files.
      *
      * If a listener for the `file` event is registered, this event will not fire.
+     *
+     * Note: using this event will cause `getSngStream()` to be called once for
+     * getting the header and once for each individual file.
+     *
+     * `fileStream`s can be cancelled. This will not affect other `fileStream`s.
      */
-    on(event: 'files', listener: (files: { fileName: string, fileStream: Readable }[]) => void): void
+    on(event: 'files', listener: (files: { fileName: string, fileStream: ReadableStream<Uint8Array> }[]) => void): void
 
     /**
      * Registers `listener` to be called when the .sng file has been fully streamed
@@ -99,31 +117,42 @@ class SngStream {
     on(event: 'error', listener: (error: Error) => void): void
 }
 ```
-# Parse .sng Stream Example
+# Parse .sng Stream Node.js Example
 ```ts
 import { createReadStream } from 'fs'
 import { SngStream } from 'parse-sng'
+import { Readable } from 'stream'
 
-const sngStream = new SngStream((start, end) => createReadStream('C:/dev/test.sng', { start: Number(start), end: Number(end) || undefined }))
+const sngStream = new SngStream(
+  (start, end) => Readable.toWeb(
+    createReadStream('C:/dev/test.sng', { start: Number(start), end: Number(end) || undefined })
+  ) as ReadableStream<Uint8Array>
+)
 
 sngStream.on('header', header => {
     console.log('Header:', header)
 })
 
-sngStream.on('file', (fileName, fileStream) => {
+sngStream.on('files', files => {
+  files.forEach(async ({ fileName, fileStream }) => {
     console.log(`Starting to read file ${fileName}`)
+    const reader = fileStream.getReader()
 
     const chunks: Uint8Array[] = []
-    fileStream.on('data', chunk => {
-        chunks.push(chunk)
-    })
-    fileStream.on('end', () => {
-        console.log(`Finished reading file ${fileName}`)
-        // Get a string for the UTF-8 text in a file with `Buffer.concat(chunks).toString()`
-    })
+    while(true) {
+      const { done, value } = await reader.read()
+      if (done) { break }
+      chunks.push(value)
+    }
+
+    console.log(`Finished reading file ${fileName}`)
+    // Get a string for the UTF-8 text in a file with `Buffer.concat(chunks).toString()`
+  })
 })
 
 sngStream.on('end', () => console.log('test.sng has been fully parsed'))
 
 sngStream.on('error', error => console.log(error))
+
+sngStream.start()
 ```

@@ -1,6 +1,5 @@
 import * as binaryParser from 'binary-parser'
 import EventEmitter from 'events'
-import { Readable, Transform } from 'readable-stream'
 
 export interface SngHeader {
   fileIdentifier: string
@@ -79,8 +78,8 @@ export const readSngFile = (header: SngHeader, sngBuffer: Buffer, filename: stri
 
 interface SngStreamEvents {
   'header': (header: SngHeader) => void
-  'file': (fileName: string, fileStream: Readable) => void
-  'files': (files: { fileName: string, fileStream: Readable }[]) => void
+  'file': (fileName: string, fileStream: ReadableStream<Uint8Array>) => void
+  'files': (files: { fileName: string, fileStream: ReadableStream<Uint8Array> }[]) => void
   'end': () => void
   'error': (error: Error) => void
 }
@@ -96,22 +95,33 @@ export declare interface SngStream {
 
   /**
    * Registers `listener` to be called when each file in .sng has started to parse.
-   * The `fileName` is passed to `listener`, along with a `Readable` stream
+   * The `fileName` is passed to `listener`, along with a `ReadableStream`
    * for the (unmasked) binary contents of the file.
    *
    * `fileStream` will emit its `end` event before `listener` is called again
    * with the next file.
+   *
+   * Note: using this event will only cause `getSngStream()` to be called once.
+   * Handling `byteStart` and `byteEnd` is not necessary.
+   *
+   * Cancelling `fileStream` will prevent any more `file` events from emitting.
+   * The source stream is canceled, and the `end` event fires.
    */
-  on(event: 'file', listener: (fileName: string, fileStream: Readable) => void): void
+  on(event: 'file', listener: (fileName: string, fileStream: ReadableStream<Uint8Array>) => void): void
 
   /**
    * Registers `listener` to be called after the .sng header has been parsed.
-   * An array of `Readable` streams is `listener`, along with each `fileName`.
+   * An array of `ReadableStream`s is `listener`, along with each `fileName`.
    * The streams are for the (unmasked) binary contents of the files.
    *
    * If a listener for the `file` event is registered, this event will not fire.
+   *
+   * Note: using this event will cause `getSngStream()` to be called once for
+   * getting the header and once for each individual file.
+   *
+   * `fileStream`s can be cancelled. This will not affect other `fileStream`s.
    */
-  on(event: 'files', listener: (files: { fileName: string, fileStream: Readable }[]) => void): void
+  on(event: 'files', listener: (files: { fileName: string, fileStream: ReadableStream<Uint8Array> }[]) => void): void
 
   /**
    * Registers `listener` to be called when the .sng file has been fully streamed
@@ -138,80 +148,90 @@ export declare interface SngStream {
  */
 export class SngStream {
 
-  private started = false
   private eventEmitter = new EventEmitter()
   private sngHeader: SngHeader | null = null
-  private sngStream: Readable
+  private sngStream: ReadableStream<Uint8Array>
+  private reader: ReadableStreamDefaultReader<Uint8Array>
   private headerChunks: Uint8Array[] = []
 
   private currentFileIndex = -1
-  /** If a streamed chunk contains the end of one file and the start of the second, the start of the second is stored here. */
+  /** If a streamed chunk contains the end of one file and the start of the next file, the start of the next file is stored here. */
   private leftoverFileChunk: Uint8Array | null = null
 
   constructor(
     /**
-     * @returns a `Readable` stream for the portion of the file between `byteStart` (inclusive) and `byteEnd` (inclusive).
+     * @returns a `ReadableStream` for the portion of the file between `byteStart` (inclusive) and `byteEnd` (inclusive).
      * If `byteEnd` is not specified, it should default to `Infinity` or `undefined`.
      * This may be called multiple times to create multiple concurrent streams.
      */
-    private getSngStream: (byteStart: bigint, byteEnd?: bigint) => Readable
+    private getSngStream: (byteStart: bigint, byteEnd?: bigint) => ReadableStream<Uint8Array>
   ) {
     this.sngStream = getSngStream(BigInt(0))
+    this.reader = this.sngStream.getReader()
   }
 
   on<T extends keyof SngStreamEvents>(event: T, listener: SngStreamEvents[T]) {
     this.eventEmitter.on(event, listener)
-    if (!this.started) {
-      this.started = true
-      this.start()
-    }
   }
 
-  private start() {
-    this.sngStream.on('error', err => this.eventEmitter.emit('error', err))
-    this.sngStream.on('data', chunk => this.readHeaderChunk(chunk))
-  }
-
-  private readHeaderChunk(chunk: Uint8Array) {
-    this.headerChunks.push(chunk)
-
-    const metadataLenOffset = 6 + 4 + 16
-    const metadataLen = this.getPendingBytes(metadataLenOffset, 8)?.readBigUint64LE() ?? null
-
-    if (metadataLen === null) { return } // Don't have metadataLen yet
-
-    const fileMetaLenOffset = metadataLenOffset + 8 + Number(metadataLen)
-    const fileMetaLen = this.getPendingBytes(fileMetaLenOffset, 8)?.readBigUint64LE() ?? null
-
-    if (fileMetaLen === null) { return } // Don't have fileMetaLen yet
-
-    const fileDataOffset = fileMetaLenOffset + 8 + Number(fileMetaLen) + 8 // Add 8 at the end for fileDataLen
-    const lastHeaderByte = this.getPendingBytes(fileDataOffset - 1, 1)
-
-    if (lastHeaderByte === null) { return } // Don't have full header yet
-
-    // Full header has been streamed in; parse it and begin streaming individual files
-    try {
-      this.sngHeader = parseSngHeader(Buffer.concat(this.headerChunks, fileDataOffset))
-      // Leave any leftover bytes for the next file in `leftoverFileChunk`
-      this.leftoverFileChunk = this.getPendingBytes(fileDataOffset, chunk.length - fileDataOffset)
-
-      this.eventEmitter.emit('header', this.sngHeader)
-      this.sngStream.removeAllListeners('data')
-      this.sngStream.pause()
-
-      if (this.eventEmitter.listenerCount('file') > 0) {
-        this.readNextFile()
-      } else {
-        this.readAllFiles()
+  /**
+   * Starts processing the provided .sng stream. Event listeners should be attached before calling this.
+   */
+  public async start() {
+    while(true) {
+      let result: ReadableStreamReadResult<Uint8Array>
+      try {
+        result = await this.reader.read()
+      } catch(err) {
+        this.eventEmitter.emit('error', err)
+        return
       }
-    } catch (err) {
-      this.sngStream.destroy()
-      this.eventEmitter.emit('error', err)
+
+      if (result.done) {
+        this.eventEmitter.emit('error', new Error('File ended before header could be parsed.'))
+        return
+      }
+
+      this.headerChunks.push(result.value)
+
+      const metadataLenOffset = 6 + 4 + 16
+      const metadataLen = this.getHeaderBuffer(metadataLenOffset, 8)?.readBigUint64LE() ?? null
+
+      if (metadataLen === null) { continue } // Don't have metadataLen yet
+
+      const fileMetaLenOffset = metadataLenOffset + 8 + Number(metadataLen)
+      const fileMetaLen = this.getHeaderBuffer(fileMetaLenOffset, 8)?.readBigUint64LE() ?? null
+
+      if (fileMetaLen === null) { continue } // Don't have fileMetaLen yet
+
+      const fileDataOffset = fileMetaLenOffset + 8 + Number(fileMetaLen) + 8 // Add 8 at the end for fileDataLen
+      const lastHeaderByte = this.getHeaderBuffer(fileDataOffset - 1, 1)
+
+      if (lastHeaderByte === null) { continue } // Don't have full header yet
+
+      // Full header has been streamed in; parse it and begin streaming individual files
+      try {
+        this.sngHeader = parseSngHeader(Buffer.concat(this.headerChunks, fileDataOffset))
+        // Leave any leftover bytes for the next file in `leftoverFileChunk`
+        this.leftoverFileChunk = this.getHeaderBuffer(fileDataOffset, result.value.length - fileDataOffset)
+
+        this.eventEmitter.emit('header', this.sngHeader)
+
+        if (this.eventEmitter.listenerCount('file') > 0) {
+          this.readNextFile()
+        } else {
+          this.readAllFiles()
+        }
+        return
+      } catch (err) {
+        this.sngStream.cancel('.sng header failed to parse.')
+        this.eventEmitter.emit('error', err)
+        return
+      }
     }
   }
 
-  private getPendingBytes(startIndex: number, length: number) {
+  private getHeaderBuffer(startIndex: number, length: number) {
     const bytes: Buffer = Buffer.alloc(length)
     let [chunkStartIndex, writeIndex] = [0, 0]
     for (const chunk of this.headerChunks) {
@@ -240,82 +260,135 @@ export class SngStream {
     }
   }
 
-  private readNextFile() {
+  private async readNextFile() {
     this.currentFileIndex++
     const fileMeta = this.sngHeader!.fileMeta[this.currentFileIndex]
-    if (!fileMeta) { // Zero files
-      this.eventEmitter.emit('end')
-      return
+    if (!fileMeta) { // No files left
+      let result: ReadableStreamReadResult<Uint8Array>
+      try {
+        result = await this.reader.read()
+      } catch(err) {
+        this.eventEmitter.emit('error', err)
+        return
+      }
+
+      if (result.done) {
+        this.eventEmitter.emit('end')
+        return
+      } else {
+        this.eventEmitter.emit('error', new Error('File did not end after the last listed file.'))
+        return
+      }
     }
 
     const chunkUnmasker = this.getChunkUnmasker(Number(fileMeta.contentsLen))
 
-    const that = this
-    const transform = new Transform({
-      transform: function(chunk: Uint8Array, _, callback) {
-        const result = chunkUnmasker(chunk)
-        callback(null, result.unmaskedChunk)
+    const fileStream = new ReadableStream<Uint8Array>({
+      start: async controller => {
+        if (this.leftoverFileChunk) {
+          // The start of this file was read in the previous read() result; enqueue it now
+          const chunk = this.leftoverFileChunk
+          this.leftoverFileChunk = null
+          const { totalProcessedBytes, unmaskedChunk } = chunkUnmasker(chunk)
 
-        if (result.isLastChunk) {
-          // There is more to read but this was the last chunk of this file; end this transform and start the next one
-          this.end(() => that.readNextFile())
-        } else if (that.sngStream.isPaused()) {
-          // We are parsing a leftover chunk; resume sngStream to continue
-          that.sngStream.pipe(this)
-          that.sngStream.resume()
+          controller.enqueue(unmaskedChunk)
+          if (totalProcessedBytes >= Number(fileMeta.contentsLen)) {
+            controller.close()
+            this.readNextFile()
+            return
+          }
+        }
+
+        while(true) {
+          if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+            await new Promise<void>(resolve => setTimeout(resolve, 30))
+            continue
+          }
+          let result: ReadableStreamReadResult<Uint8Array>
+          try {
+            result = await this.reader.read()
+          } catch(err) {
+            controller.error(err)
+            this.eventEmitter.emit('error', err)
+            return
+          }
+
+          if (result.done) {
+            controller.error(new Error('File ended before file could be parsed.'))
+            this.eventEmitter.emit('error', new Error('File ended before all files could be parsed.'))
+            return
+          }
+
+          const { totalProcessedBytes, unmaskedChunk } = chunkUnmasker(result.value)
+
+          controller.enqueue(unmaskedChunk)
+          if (totalProcessedBytes >= Number(fileMeta.contentsLen)) {
+            controller.close()
+            this.readNextFile()
+            return
+          }
         }
       },
-      flush: function(callback) {
-        that.sngStream.unpipe(this as any)
-        that.sngStream.pause()
-        callback()
-      }
-    })
-
-    this.eventEmitter.emit('file', fileMeta.filename, transform)
-
-    transform.on('end', () => {
-      if (this.currentFileIndex + 1 >= this.sngHeader!.fileMeta.length) {
+      cancel: () => {
+        this.reader.cancel('Stream was manually canceled.')
         this.eventEmitter.emit('end')
       }
     })
 
-    if (this.leftoverFileChunk) {
-      // Write the leftover chunk before resuming sngStream
-      transform.write(this.leftoverFileChunk)
-    } else {
-      // No leftover chunk; resume sngStream immediately
-      this.sngStream.pipe(transform)
-      this.sngStream.resume()
-    }
+    this.eventEmitter.emit('file', fileMeta.filename, fileStream)
   }
 
   private readAllFiles() {
+    this.reader.cancel('Using individual readers for each file.')
+    let endedStreamCount = 0
+
     const files = this.sngHeader!.fileMeta.map(fileMeta => {
       const chunkUnmasker = this.getChunkUnmasker(Number(fileMeta.contentsLen))
+      const sngStream = this.getSngStream(fileMeta.contentsIndex, fileMeta.contentsIndex + fileMeta.contentsLen - BigInt(1))
+      const reader = sngStream.getReader()
       return {
         fileName: fileMeta.filename,
-        fileStream: this.getSngStream(
-          fileMeta.contentsIndex,
-          fileMeta.contentsIndex + fileMeta.contentsLen - BigInt(1)
-        ).pipe(new Transform({
-          transform: function(chunk: Uint8Array, _, callback) {
-            const result = chunkUnmasker(chunk)
-            callback(null, result.unmaskedChunk)
+        fileStream: new ReadableStream<Uint8Array>({
+          start: async controller => {
+            while(true) {
+              if (controller.desiredSize !== null && controller.desiredSize <= 0) {
+                await new Promise<void>(resolve => setTimeout(resolve, 30))
+                continue
+              }
+              let result: ReadableStreamReadResult<Uint8Array>
+              try {
+                result = await reader.read()
+              } catch(err) {
+                controller.error(err)
+                this.eventEmitter.emit('error', err)
+                return
+              }
+
+              if (result.done) {
+                controller.close()
+                endedStreamCount++
+                if (endedStreamCount >= this.sngHeader!.fileMeta.length) {
+                  this.eventEmitter.emit('end')
+                }
+                return
+              }
+
+              const unmaskedResult = chunkUnmasker(result.value)
+              controller.enqueue(unmaskedResult.unmaskedChunk)
+            }
+          },
+          cancel: () => {
+            reader.cancel()
+            endedStreamCount++
+            if (endedStreamCount >= this.sngHeader!.fileMeta.length) {
+              this.eventEmitter.emit('end')
+            }
           }
-        }))
+        })
       }
     })
 
     this.eventEmitter.emit('files', files)
-
-    let endedStreamCount = 0
-    files.map(f => f.fileStream.on('end', () => {
-      endedStreamCount++
-      if (endedStreamCount >= this.sngHeader!.fileMeta.length) {
-        this.eventEmitter.emit('end')
-      }
-    }))
   }
 
   private getChunkUnmasker(fileSize: number) {
@@ -327,21 +400,20 @@ export class SngStream {
      * If `chunk` contains the start of the next file, it's not included and is put in `leftoverFileChunk` instead.
      */
     return (chunk: Uint8Array) => {
-      const realChunkLength = Math.min(chunkStartIndex + chunk.length, fileSize) - chunkStartIndex
-      const isLastChunk = realChunkLength < chunk.length
+      const usedChunkLength = Math.min(chunkStartIndex + chunk.length, fileSize) - chunkStartIndex
 
-      const unmaskedChunk = Buffer.allocUnsafe(realChunkLength)
-      for (let i = 0; i < realChunkLength; i++) {
+      const unmaskedChunk = Buffer.allocUnsafe(usedChunkLength)
+      for (let i = 0; i < usedChunkLength; i++) {
         const xorKey = xorMask[(chunkStartIndex + i) % 16] ^ ((chunkStartIndex + i) & 0xFF)
         unmaskedChunk[i] = chunk[i] ^ xorKey
       }
 
-      if (isLastChunk) {
+      if (usedChunkLength < chunk.length) {
         // Leave any leftover bytes for the next file in `leftoverFileChunk`
-        this.leftoverFileChunk = Buffer.from(chunk).subarray(realChunkLength, chunk.length)
+        this.leftoverFileChunk = Buffer.from(chunk).subarray(usedChunkLength, chunk.length)
       }
       chunkStartIndex += chunk.length
-      return { isLastChunk, unmaskedChunk }
+      return { totalProcessedBytes: chunkStartIndex, unmaskedChunk }
     }
   }
 }
