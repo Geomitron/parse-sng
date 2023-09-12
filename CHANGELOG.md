@@ -1,5 +1,15 @@
 # parse-sng
 
+## 3.0.0
+
+### Major Changes
+
+- 3014d68: Convert to ReadableStream
+
+### Minor Changes
+
+- a411abf: Use browser-compatible APIs
+
 ## 2.0.0
 
 ### Major Changes
