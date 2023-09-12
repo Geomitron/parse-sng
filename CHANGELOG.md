@@ -1,5 +1,11 @@
 # parse-sng
 
+## 3.0.1
+
+### Patch Changes
+
+- c0bf56e: Use Uint8Array methods
+
 ## 3.0.0
 
 ### Major Changes
