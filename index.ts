@@ -4,7 +4,7 @@ import EventEmitter from 'events'
 export interface SngHeader {
   fileIdentifier: string
   version: number
-  xorMask: Buffer
+  xorMask: Uint8Array
   metadata: { [key: string]: string }
   fileMeta: {
     filename: string
@@ -18,7 +18,7 @@ export interface SngHeader {
  * @throws an exception if the .sng file is incorrectly formatted.
  * @returns A `SngHeader` object containing the .sng file's metadata.
  */
-export const parseSngHeader = (sngBuffer: Buffer) => {
+export const parseSngHeader = (sngBuffer: Uint8Array) => {
   const metadataParser = new binaryParser.Parser()
     .int32le('keyLen')
     .string('key', { length: 'keyLen' })
@@ -57,9 +57,9 @@ export const parseSngHeader = (sngBuffer: Buffer) => {
  * @param filename The name of the file to read from the .sng [file] section.
  * @throws an exception if `filename` does not match any filenames found in
  * `header.fileMeta` or if the .sng file is incorrectly formatted.
- * @returns A new `Buffer` object containing the unmasked binary contents of the file.
+ * @returns A new `Uint8Array` object containing the unmasked binary contents of the file.
  */
-export const readSngFile = (header: SngHeader, sngBuffer: Buffer, filename: string) => {
+export const readSngFile = (header: SngHeader, sngBuffer: Uint8Array, filename: string) => {
   const fileMeta = header.fileMeta.find(fm => fm.filename === filename)
   if (!fileMeta) {
     throw new Error(`Filename "${filename}" was not found in the .sng header.`)
@@ -67,7 +67,7 @@ export const readSngFile = (header: SngHeader, sngBuffer: Buffer, filename: stri
 
   const fileSize = Number(fileMeta.contentsLen)
   const fileStart = Number(fileMeta.contentsIndex)
-  const unmaskedBuffer = Buffer.allocUnsafe(fileSize)
+  const unmaskedBuffer = new Uint8Array(fileSize)
   for (let i = 0; i < fileSize; i++) {
     const xorKey = header.xorMask[i % 16] ^ (i & 0xFF)
     unmaskedBuffer[i] = sngBuffer[i + fileStart] ^ xorKey
@@ -195,12 +195,12 @@ export class SngStream {
       this.headerChunks.push(result.value)
 
       const metadataLenOffset = 6 + 4 + 16
-      const metadataLen = this.getHeaderBuffer(metadataLenOffset, 8)?.readBigUint64LE() ?? null
+      const metadataLen = this.readBigUint64LE(this.getHeaderBuffer(metadataLenOffset, 8))
 
       if (metadataLen === null) { continue } // Don't have metadataLen yet
 
       const fileMetaLenOffset = metadataLenOffset + 8 + Number(metadataLen)
-      const fileMetaLen = this.getHeaderBuffer(fileMetaLenOffset, 8)?.readBigUint64LE() ?? null
+      const fileMetaLen = this.readBigUint64LE(this.getHeaderBuffer(fileMetaLenOffset, 8))
 
       if (fileMetaLen === null) { continue } // Don't have fileMetaLen yet
 
@@ -211,7 +211,7 @@ export class SngStream {
 
       // Full header has been streamed in; parse it and begin streaming individual files
       try {
-        this.sngHeader = parseSngHeader(Buffer.concat(this.headerChunks, fileDataOffset))
+        this.sngHeader = parseSngHeader(this.mergeUint8Arrays(...this.headerChunks))
         // Leave any leftover bytes for the next file in `leftoverFileChunk`
         this.leftoverFileChunk = this.getHeaderBuffer(fileDataOffset, result.value.length - fileDataOffset)
 
@@ -231,8 +231,25 @@ export class SngStream {
     }
   }
 
+  private readBigUint64LE(buffer: Uint8Array | null) {
+    if (buffer === null) { return null }
+    return new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength).getBigUint64(0, true)
+  }
+
+  private mergeUint8Arrays(...buffers: Uint8Array[]): Uint8Array {
+    const totalSize = buffers.reduce((acc, e) => acc + e.length, 0)
+    const merged = new Uint8Array(totalSize)
+
+    buffers.forEach((array, i, arrays) => {
+      const offset = arrays.slice(0, i).reduce((acc, e) => acc + e.length, 0)
+      merged.set(array, offset)
+    })
+
+    return merged
+  }
+
   private getHeaderBuffer(startIndex: number, length: number) {
-    const bytes: Buffer = Buffer.alloc(length)
+    const bytes = new Uint8Array(length)
     let [chunkStartIndex, writeIndex] = [0, 0]
     for (const chunk of this.headerChunks) {
       if (chunkStartIndex + chunk.length <= startIndex) {
@@ -402,7 +419,7 @@ export class SngStream {
     return (chunk: Uint8Array) => {
       const usedChunkLength = Math.min(chunkStartIndex + chunk.length, fileSize) - chunkStartIndex
 
-      const unmaskedChunk = Buffer.allocUnsafe(usedChunkLength)
+      const unmaskedChunk = new Uint8Array(usedChunkLength)
       for (let i = 0; i < usedChunkLength; i++) {
         const xorKey = xorMask[(chunkStartIndex + i) % 16] ^ ((chunkStartIndex + i) & 0xFF)
         unmaskedChunk[i] = chunk[i] ^ xorKey
@@ -410,7 +427,7 @@ export class SngStream {
 
       if (usedChunkLength < chunk.length) {
         // Leave any leftover bytes for the next file in `leftoverFileChunk`
-        this.leftoverFileChunk = Buffer.from(chunk).subarray(usedChunkLength, chunk.length)
+        this.leftoverFileChunk = chunk.subarray(usedChunkLength, chunk.length)
       }
       chunkStartIndex += chunk.length
       return { totalProcessedBytes: chunkStartIndex, unmaskedChunk }

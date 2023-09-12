@@ -10,7 +10,7 @@ This package provides two ways to parse .sng files:
 interface SngHeader {
     fileIdentifier: string
     version: number
-    xorMask: Buffer
+    xorMask: Uint8Array
     metadata: {
         [key: string]: string
     }
@@ -26,7 +26,7 @@ interface SngHeader {
  * @throws an exception if the .sng file is incorrectly formatted.
  * @returns A `SngHeader` object containing the .sng file's metadata.
  */
-function parseSngHeader(sngBuffer: Buffer): SngHeader
+function parseSngHeader(sngBuffer: Uint8Array): SngHeader
 
 /**
  * @param header The `SngHeader` object returned from `parseSngHeader()`.
@@ -34,9 +34,9 @@ function parseSngHeader(sngBuffer: Buffer): SngHeader
  * @param filename The name of the file to read from the .sng [file] section.
  * @throws an exception if `filename` does not match any filenames found in
  * `header.fileMeta` or if the .sng file is incorrectly formatted.
- * @returns A new `Buffer` object containing the unmasked binary contents of the file.
+ * @returns A new `Uint8Array` object containing the unmasked binary contents of the file.
  */
-function readSngFile(header: SngHeader, sngBuffer: Buffer, filename: string): Buffer
+function readSngFile(header: SngHeader, sngBuffer: Uint8Array, filename: string): Uint8Array
 ```
 ## Parse .sng Stream
 ```ts
