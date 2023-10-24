@@ -119,7 +119,7 @@ class SngStream {
 ```
 # Parse .sng Stream Node.js Example
 ```ts
-import { createReadStream } from 'fs'
+import { createReadStream, createWriteStream } from 'fs'
 import { SngStream } from 'parse-sng'
 import { Readable } from 'stream'
 
@@ -138,15 +138,15 @@ sngStream.on('files', files => {
     console.log(`Starting to read file ${fileName}`)
     const reader = fileStream.getReader()
 
-    const chunks: Uint8Array[] = []
+    const writeStream = createWriteStream('C:/dev/output/' + fileName)
     while(true) {
       const { done, value } = await reader.read()
       if (done) { break }
-      chunks.push(value)
+      writeStream.write(value)
     }
+    writeStream.close()
 
     console.log(`Finished reading file ${fileName}`)
-    // Get a string for the UTF-8 text in a file with `Buffer.concat(chunks).toString()`
   })
 })
 

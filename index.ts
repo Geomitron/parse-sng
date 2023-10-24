@@ -281,24 +281,20 @@ export class SngStream {
     this.currentFileIndex++
     const fileMeta = this.sngHeader!.fileMeta[this.currentFileIndex]
     if (!fileMeta) { // No files left
-      let result: ReadableStreamReadResult<Uint8Array>
       try {
-        result = await this.reader.read()
+        const result = await this.reader.read()
+        if (result.done) {
+          this.eventEmitter.emit('end')
+        } else {
+          this.eventEmitter.emit('error', new Error('File did not end after the last listed file.'))
+        }
       } catch(err) {
         this.eventEmitter.emit('error', err)
-        return
       }
-
-      if (result.done) {
-        this.eventEmitter.emit('end')
-        return
-      } else {
-        this.eventEmitter.emit('error', new Error('File did not end after the last listed file.'))
-        return
-      }
+      return
     }
 
-    const chunkUnmasker = this.getChunkUnmasker(Number(fileMeta.contentsLen))
+    const chunkUnmasker = this.getChunkUnmasker(fileMeta.contentsLen)
 
     const fileStream = new ReadableStream<Uint8Array>({
       start: async controller => {
@@ -309,8 +305,10 @@ export class SngStream {
           const { totalProcessedBytes, unmaskedChunk } = chunkUnmasker(chunk)
 
           controller.enqueue(unmaskedChunk)
-          if (totalProcessedBytes >= Number(fileMeta.contentsLen)) {
+          if (totalProcessedBytes >= fileMeta.contentsLen) {
             controller.close()
+            await Promise.resolve()
+            await Promise.resolve()
             this.readNextFile()
             return
           }
@@ -339,8 +337,10 @@ export class SngStream {
           const { totalProcessedBytes, unmaskedChunk } = chunkUnmasker(result.value)
 
           controller.enqueue(unmaskedChunk)
-          if (totalProcessedBytes >= Number(fileMeta.contentsLen)) {
+          if (totalProcessedBytes >= fileMeta.contentsLen) {
             controller.close()
+            await Promise.resolve()
+            await Promise.resolve()
             this.readNextFile()
             return
           }
@@ -360,7 +360,7 @@ export class SngStream {
     let endedStreamCount = 0
 
     const files = this.sngHeader!.fileMeta.map(fileMeta => {
-      const chunkUnmasker = this.getChunkUnmasker(Number(fileMeta.contentsLen))
+      const chunkUnmasker = this.getChunkUnmasker(fileMeta.contentsLen)
       const sngStream = this.getSngStream(fileMeta.contentsIndex, fileMeta.contentsIndex + fileMeta.contentsLen - BigInt(1))
       const reader = sngStream.getReader()
       return {
@@ -408,20 +408,22 @@ export class SngStream {
     this.eventEmitter.emit('files', files)
   }
 
-  private getChunkUnmasker(fileSize: number) {
+  private getChunkUnmasker(fileSize: bigint) {
     const xorMask = this.sngHeader!.xorMask
-    let chunkStartIndex = 0
+    let chunkStartIndex = BigInt(0)
 
     /**
      * Unmasks `chunk` and returns it.
      * If `chunk` contains the start of the next file, it's not included and is put in `leftoverFileChunk` instead.
      */
     return (chunk: Uint8Array) => {
-      const usedChunkLength = Math.min(chunkStartIndex + chunk.length, fileSize) - chunkStartIndex
+      const maxEndIndex = chunkStartIndex + BigInt(chunk.length)
+      const usedChunkLength = Number(maxEndIndex > fileSize ? fileSize - chunkStartIndex : maxEndIndex - chunkStartIndex)
 
       const unmaskedChunk = new Uint8Array(usedChunkLength)
       for (let i = 0; i < usedChunkLength; i++) {
-        const xorKey = xorMask[(chunkStartIndex + i) % 16] ^ ((chunkStartIndex + i) & 0xFF)
+        const fileIndex = chunkStartIndex + BigInt(i)
+        const xorKey = xorMask[Number(fileIndex % BigInt(16))] ^ Number(fileIndex & BigInt(0xFF))
         unmaskedChunk[i] = chunk[i] ^ xorKey
       }
 
@@ -429,7 +431,7 @@ export class SngStream {
         // Leave any leftover bytes for the next file in `leftoverFileChunk`
         this.leftoverFileChunk = chunk.subarray(usedChunkLength, chunk.length)
       }
-      chunkStartIndex += chunk.length
+      chunkStartIndex += BigInt(chunk.length)
       return { totalProcessedBytes: chunkStartIndex, unmaskedChunk }
     }
   }
