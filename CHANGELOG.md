@@ -1,5 +1,11 @@
 # parse-sng
 
+## 3.0.2
+
+### Patch Changes
+
+- aca60c7: Fixed parsing large files
+
 ## 3.0.1
 
 ### Patch Changes
