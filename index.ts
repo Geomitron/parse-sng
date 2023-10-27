@@ -307,8 +307,7 @@ export class SngStream {
           controller.enqueue(unmaskedChunk)
           if (totalProcessedBytes >= fileMeta.contentsLen) {
             controller.close()
-            await Promise.resolve()
-            await Promise.resolve()
+            await new Promise<void>(resolve => setTimeout(resolve, 0))
             this.readNextFile()
             return
           }
@@ -339,8 +338,7 @@ export class SngStream {
           controller.enqueue(unmaskedChunk)
           if (totalProcessedBytes >= fileMeta.contentsLen) {
             controller.close()
-            await Promise.resolve()
-            await Promise.resolve()
+            await new Promise<void>(resolve => setTimeout(resolve, 0))
             this.readNextFile()
             return
           }
@@ -421,10 +419,13 @@ export class SngStream {
       const usedChunkLength = Number(maxEndIndex > fileSize ? fileSize - chunkStartIndex : maxEndIndex - chunkStartIndex)
 
       const unmaskedChunk = new Uint8Array(usedChunkLength)
+      // The variable that cycles between 0 and 255 based on chunkStartIndex
+      let cyclicIndex = Number(chunkStartIndex % BigInt(256))
       for (let i = 0; i < usedChunkLength; i++) {
-        const fileIndex = chunkStartIndex + BigInt(i)
-        const xorKey = xorMask[Number(fileIndex % BigInt(16))] ^ Number(fileIndex & BigInt(0xFF))
+        const xorKey = xorMask[cyclicIndex % 16] ^ cyclicIndex
         unmaskedChunk[i] = chunk[i] ^ xorKey
+        // Increment cyclicIndex and wrap around if it exceeds 255
+        cyclicIndex = (cyclicIndex + 1) % 256
       }
 
       if (usedChunkLength < chunk.length) {
