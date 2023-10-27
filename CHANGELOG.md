@@ -1,5 +1,11 @@
 # parse-sng
 
+## 3.0.3
+
+### Patch Changes
+
+- c3a6a6d: Fixed performance issue
+
 ## 3.0.2
 
 ### Patch Changes
