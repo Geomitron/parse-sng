@@ -299,6 +299,12 @@ export class SngStream {
 
     const fileStream = new ReadableStream<Uint8Array>({
       start: async controller => {
+        if (fileMeta.contentsLen === BigInt(0)) {
+          controller.close()
+          await new Promise<void>(resolve => setTimeout(resolve, 2))
+          this.readNextFile()
+          return
+        }
         if (this.leftoverFileChunk) {
           // The start of this file was read in the previous read() result; enqueue it now
           const chunk = this.leftoverFileChunk
@@ -308,7 +314,7 @@ export class SngStream {
           controller.enqueue(unmaskedChunk)
           if (totalProcessedBytes >= fileMeta.contentsLen) {
             controller.close()
-            await new Promise<void>(resolve => setTimeout(resolve, 0))
+            await new Promise<void>(resolve => setTimeout(resolve, 2))
             this.readNextFile()
             return
           }
@@ -339,7 +345,7 @@ export class SngStream {
           controller.enqueue(unmaskedChunk)
           if (totalProcessedBytes >= fileMeta.contentsLen) {
             controller.close()
-            await new Promise<void>(resolve => setTimeout(resolve, 0))
+            await new Promise<void>(resolve => setTimeout(resolve, 2))
             this.readNextFile()
             return
           }
@@ -367,6 +373,7 @@ export class SngStream {
               controller.close()
               endedStreamCount++
               if (endedStreamCount >= this.sngHeader!.fileMeta.length) {
+                await new Promise<void>(resolve => setTimeout(resolve, 2))
                 this.eventEmitter.emit('end')
               }
             },
@@ -398,6 +405,7 @@ export class SngStream {
                 controller.close()
                 endedStreamCount++
                 if (endedStreamCount >= this.sngHeader!.fileMeta.length) {
+                  await new Promise<void>(resolve => setTimeout(resolve, 2))
                   this.eventEmitter.emit('end')
                 }
                 return
@@ -407,10 +415,11 @@ export class SngStream {
               controller.enqueue(unmaskedResult.unmaskedChunk)
             }
           },
-          cancel: () => {
+          cancel: async () => {
             reader.cancel()
             endedStreamCount++
             if (endedStreamCount >= this.sngHeader!.fileMeta.length) {
+              await new Promise<void>(resolve => setTimeout(resolve, 2))
               this.eventEmitter.emit('end')
             }
           }

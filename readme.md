@@ -122,6 +122,8 @@ class SngStream {
 import { createReadStream, createWriteStream } from 'fs'
 import { SngStream } from 'parse-sng'
 import { Readable } from 'stream'
+import { mkdir } from 'fs/promises'
+import { join, parse } from 'path'
 
 const sngStream = new SngStream(
   (start, end) => Readable.toWeb(
@@ -138,7 +140,8 @@ sngStream.on('files', files => {
     console.log(`Starting to read file ${fileName}`)
     const reader = fileStream.getReader()
 
-    const writeStream = createWriteStream('C:/dev/output/' + fileName)
+    await mkdir(join('C:/dev/output', parse(fileName).dir), { recursive: true })
+    const writeStream = createWriteStream(join('C:/dev/output', fileName))
     while(true) {
       const { done, value } = await reader.read()
       if (done) { break }
