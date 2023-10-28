@@ -224,6 +224,7 @@ export class SngStream {
         }
         return
       } catch (err) {
+        this.reader.releaseLock()
         this.sngStream.cancel('.sng header failed to parse.')
         this.eventEmitter.emit('error', err)
         return
@@ -358,6 +359,20 @@ export class SngStream {
     let endedStreamCount = 0
 
     const files = this.sngHeader!.fileMeta.map(fileMeta => {
+      if (fileMeta.contentsLen === BigInt(0)) {
+        return {
+          fileName: fileMeta.filename,
+          fileStream: new ReadableStream<Uint8Array>({
+            start: async controller => {
+              controller.close()
+              endedStreamCount++
+              if (endedStreamCount >= this.sngHeader!.fileMeta.length) {
+                this.eventEmitter.emit('end')
+              }
+            },
+          }),
+        }
+      }
       const chunkUnmasker = this.getChunkUnmasker(fileMeta.contentsLen)
       const sngStream = this.getSngStream(fileMeta.contentsIndex, fileMeta.contentsIndex + fileMeta.contentsLen - BigInt(1))
       const reader = sngStream.getReader()
@@ -399,7 +414,7 @@ export class SngStream {
               this.eventEmitter.emit('end')
             }
           }
-        })
+        }),
       }
     })
 
