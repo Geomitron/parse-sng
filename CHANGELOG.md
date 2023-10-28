@@ -1,5 +1,12 @@
 # parse-sng
 
+## 3.0.4
+
+### Patch Changes
+
+- 2fd77cf: Fixed zero-length files
+- 2fd77cf: Fixed error handling
+
 ## 3.0.3
 
 ### Patch Changes
