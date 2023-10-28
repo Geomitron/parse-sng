@@ -1,5 +1,11 @@
 # parse-sng
 
+## 3.0.5
+
+### Patch Changes
+
+- cb203fe: Fixed zero-length files
+
 ## 3.0.4
 
 ### Patch Changes
