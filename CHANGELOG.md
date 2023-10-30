@@ -1,5 +1,11 @@
 # parse-sng
 
+## 3.1.0
+
+### Minor Changes
+
+- dc66b9e: Add song.ini generation
+
 ## 3.0.5
 
 ### Patch Changes
