@@ -40,6 +40,17 @@ function readSngFile(header: SngHeader, sngBuffer: Uint8Array, filename: string)
 ```
 ## Parse .sng Stream
 ```ts
+interface SngStreamConfig {
+  /**
+   * The .sng format doesn't list a `song.ini` file in the `fileMeta`; that information is stored in `metadata`.
+   *
+   * Set this to true for `SngStream` to generate and emit a `song.ini` file in the `file` or `files` events.
+   *
+   * Default: `false`.
+   */
+  generateSongIni: boolean
+}
+
 /**
  * A class that reads and parses a .sng `Uint8Array` stream and emits
  * events when the different components of the stream have been parsed.
@@ -52,7 +63,8 @@ class SngStream {
          * If `byteEnd` is not specified, it should default to `Infinity` or `undefined`.
          * This may be called multiple times to create multiple concurrent streams.
          */
-        getSngStream: (byteStart: bigint, byteEnd?: bigint) => ReadableStream<Uint8Array>
+        getSngStream: (byteStart: bigint, byteEnd?: bigint) => ReadableStream<Uint8Array>,
+        config?: SngStreamConfig,
     ) { }
 
     /**
@@ -128,7 +140,8 @@ import { join, parse } from 'path'
 const sngStream = new SngStream(
   (start, end) => Readable.toWeb(
     createReadStream('C:/dev/test.sng', { start: Number(start), end: Number(end) || undefined })
-  ) as ReadableStream<Uint8Array>
+  ) as ReadableStream<Uint8Array>,
+  { generateSongIni: true },
 )
 
 sngStream.on('header', header => {

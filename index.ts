@@ -76,6 +76,17 @@ export const readSngFile = (header: SngHeader, sngBuffer: Uint8Array, filename: 
   return unmaskedBuffer
 }
 
+export interface SngStreamConfig {
+  /**
+   * The .sng format doesn't list a `song.ini` file in the `fileMeta`; that information is stored in `metadata`.
+   *
+   * Set this to true for `SngStream` to generate and emit a `song.ini` file in the `file` or `files` events.
+   *
+   * Default: `false`.
+   */
+  generateSongIni: boolean
+}
+
 interface SngStreamEvents {
   'header': (header: SngHeader) => void
   'file': (fileName: string, fileStream: ReadableStream<Uint8Array>) => void
@@ -148,6 +159,8 @@ export declare interface SngStream {
  */
 export class SngStream {
 
+	private config: SngStreamConfig
+
   private eventEmitter = new EventEmitter()
   private sngHeader: SngHeader | null = null
   private sngStream: ReadableStream<Uint8Array>
@@ -164,8 +177,13 @@ export class SngStream {
      * If `byteEnd` is not specified, it should default to `Infinity` or `undefined`.
      * This may be called multiple times to create multiple concurrent streams.
      */
-    private getSngStream: (byteStart: bigint, byteEnd?: bigint) => ReadableStream<Uint8Array>
+    private getSngStream: (byteStart: bigint, byteEnd?: bigint) => ReadableStream<Uint8Array>,
+    config?: SngStreamConfig,
   ) {
+		this.config = {
+			generateSongIni: false,
+			...config,
+		}
     this.sngStream = getSngStream(BigInt(0))
     this.reader = this.sngStream.getReader()
   }
@@ -218,7 +236,18 @@ export class SngStream {
         this.eventEmitter.emit('header', this.sngHeader)
 
         if (this.eventEmitter.listenerCount('file') > 0) {
-          this.readNextFile()
+          if (this.config.generateSongIni) {
+            this.eventEmitter.emit('file', 'song.ini', new ReadableStream<Uint8Array>({
+              start: async controller => {
+                controller.enqueue(this.generateIniFileText())
+                controller.close()
+                await new Promise<void>(resolve => setTimeout(resolve, 2))
+                this.readNextFile()
+              }
+            }))
+          } else {
+            this.readNextFile()
+          }
         } else {
           this.readAllFiles()
         }
@@ -426,6 +455,23 @@ export class SngStream {
         }),
       }
     })
+    if (this.config.generateSongIni) {
+      endedStreamCount--
+      files.unshift({
+        fileName: 'song.ini',
+        fileStream: new ReadableStream<Uint8Array>({
+          start: async controller => {
+            controller.enqueue(this.generateIniFileText())
+            controller.close()
+            endedStreamCount++
+            if (endedStreamCount >= this.sngHeader!.fileMeta.length) {
+              await new Promise<void>(resolve => setTimeout(resolve, 2))
+              this.eventEmitter.emit('end')
+            }
+          },
+        }),
+      })
+    }
 
     this.eventEmitter.emit('files', files)
   }
@@ -460,4 +506,60 @@ export class SngStream {
       return { totalProcessedBytes: chunkStartIndex, unmaskedChunk }
     }
   }
+
+  private generateIniFileText() {
+    const headerKeys = Object.keys(this.sngHeader?.metadata ?? {})
+    if (!this.sngHeader || !headerKeys.length) { return new TextEncoder().encode('[Song]\n') }
+
+    let iniText = '[Song]\n'
+    for (const key of defaultKeys) {
+      if (this.sngHeader.metadata[key] && this.sngHeader.metadata[key] !== defaultMetadata[key]) {
+        iniText += `${key} = ${this.sngHeader.metadata[key]}\n`
+      }
+    }
+    for (const key of headerKeys) {
+      if (defaultKeys.includes(key)) { continue }
+      iniText += `${key} = ${this.sngHeader.metadata[key]}\n`
+    }
+    return new TextEncoder().encode(iniText)
+  }
 }
+
+const defaultMetadata = {
+	'name': 'Unknown Name',
+	'artist': 'Unknown Artist',
+	'album': 'Unknown Album',
+	'genre': 'Unknown Genre',
+	'year': 'Unknown Year',
+	'charter': 'Unknown Charter',
+	/** Units of ms */ 'song_length': '0',
+	'diff_band': '-1',
+	'diff_guitar': '-1',
+	'diff_guitar_coop': '-1',
+	'diff_rhythm': '-1',
+	'diff_bass': '-1',
+	'diff_drums': '-1',
+	'diff_drums_real': '-1',
+	'diff_keys': '-1',
+	'diff_guitarghl': '-1',
+	'diff_guitar_coop_ghl': '-1',
+	'diff_rhythm_ghl': '-1',
+	'diff_bassghl': '-1',
+	'diff_vocals': '-1',
+	/** Units of ms */ 'preview_start_time': '-1',
+	'icon': '',
+	'loading_phrase': '',
+	'album_track': '16000',
+	'playlist_track': '16000',
+  'playlist': '',
+	'modchart': 'False',
+	/** Units of ms */ 'delay': '0',
+	'hopo_frequency': '0',
+	'eighthnote_hopo': 'False',
+	'multiplier_note': '0',
+	'video_start_time': '0',
+	'five_lane_drums': 'False',
+	'pro_drums': 'False',
+	'end_events': 'True',
+} as { [key: string]: string }
+const defaultKeys = Object.keys(defaultMetadata)
