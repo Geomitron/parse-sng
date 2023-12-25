@@ -231,7 +231,8 @@ export class SngStream {
       try {
         this.sngHeader = parseSngHeader(this.mergeUint8Arrays(...this.headerChunks))
         // Leave any leftover bytes for the next file in `leftoverFileChunk`
-        this.leftoverFileChunk = this.getHeaderBuffer(fileDataOffset, result.value.length - fileDataOffset)
+        const lastChunkStartIndex = this.headerChunks.slice(0, -1).map(c => c.length).reduce((a, b) => a + b, 0)
+        this.leftoverFileChunk = this.getHeaderBuffer(fileDataOffset, (lastChunkStartIndex + result.value.length) - fileDataOffset)
 
         this.eventEmitter.emit('header', this.sngHeader)
 
