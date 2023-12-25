@@ -1,5 +1,11 @@
 # parse-sng
 
+## 3.1.1
+
+### Patch Changes
+
+- d83fe41: Fix crash when the header spans multiple buffer chunks
+
 ## 3.1.0
 
 ### Minor Changes
