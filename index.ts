@@ -351,10 +351,6 @@ export class SngStream {
         }
 
         while(true) {
-          if (controller.desiredSize !== null && controller.desiredSize <= 0) {
-            await new Promise<void>(resolve => setTimeout(resolve, 30))
-            continue
-          }
           let result: ReadableStreamReadResult<Uint8Array>
           try {
             result = await this.reader.read()
@@ -418,10 +414,6 @@ export class SngStream {
         fileStream: new ReadableStream<Uint8Array>({
           start: async controller => {
             while(true) {
-              if (controller.desiredSize !== null && controller.desiredSize <= 0) {
-                await new Promise<void>(resolve => setTimeout(resolve, 30))
-                continue
-              }
               let result: ReadableStreamReadResult<Uint8Array>
               try {
                 result = await reader.read()
