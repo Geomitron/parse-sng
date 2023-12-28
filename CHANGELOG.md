@@ -1,5 +1,11 @@
 # parse-sng
 
+## 3.1.2
+
+### Patch Changes
+
+- 6955f63: Improve performance
+
 ## 3.1.1
 
 ### Patch Changes
