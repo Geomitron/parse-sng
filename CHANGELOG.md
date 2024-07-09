@@ -1,5 +1,11 @@
 # parse-sng
 
+## 4.0.1
+
+### Patch Changes
+
+- aeeb356: Fix build issue
+
 ## 4.0.0
 
 ### Major Changes
