@@ -1,5 +1,11 @@
 # parse-sng
 
+## 4.0.0
+
+### Major Changes
+
+- 94a1d73: Simplify API, bugfixing
+
 ## 3.1.2
 
 ### Patch Changes
