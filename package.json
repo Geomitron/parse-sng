@@ -4,6 +4,7 @@
   "description": "A library that parses the .sng file format.",
   "author": "Geo",
   "license": "MIT",
+  "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "scripts": {
