@@ -135,13 +135,19 @@ export class SngStream {
         const lastChunkStartIndex = this.headerChunks.slice(0, -1).map(c => c.length).reduce((a, b) => a + b, 0)
         this.leftoverFileChunk = this.getHeaderBuffer(fileDataOffset, (lastChunkStartIndex + result.value.length) - fileDataOffset)
 
+        const iniFileTextBuffer = generateIniFileText(this.sngHeader)
+
+        if (this.config.generateSongIni) {
+          this.sngHeader.fileMeta.unshift({ filename: 'song.ini', contentsIndex: BigInt(-1), contentsLen: BigInt(iniFileTextBuffer.length) })
+        }
+
         this.eventEmitter.emit('header', this.sngHeader)
 
         if (this.config.generateSongIni) {
           await new Promise<void>(resolve => {
             this.eventEmitter.emit('file', 'song.ini', new ReadableStream<Uint8Array>({
               start: async controller => {
-                controller.enqueue(generateIniFileText(this.sngHeader))
+                controller.enqueue(iniFileTextBuffer)
                 controller.close()
               }
             }), this.sngHeader!.fileMeta.length > 0 ? resolve : null)
