@@ -150,12 +150,15 @@ export class SngStream {
                 controller.enqueue(iniFileTextBuffer)
                 controller.close()
               }
-            }), this.sngHeader!.fileMeta.length > 0 ? resolve : null)
+            }), this.sngHeader!.fileMeta.length > 1 ? resolve : null)
           })
-        }
-
-        if (this.sngHeader!.fileMeta.length > 0) {
-          this.readFile(this.sngHeader!.fileMeta[0])
+          if (this.sngHeader!.fileMeta.length > 1) {
+            this.readFile(this.sngHeader!.fileMeta[1])
+          }
+        } else {
+          if (this.sngHeader!.fileMeta.length > 0) {
+            this.readFile(this.sngHeader!.fileMeta[0])
+          }
         }
         return
       }
