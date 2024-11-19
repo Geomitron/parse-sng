@@ -1,5 +1,11 @@
 # parse-sng
 
+## 4.0.3
+
+### Patch Changes
+
+- 37344d9: Add song.ini to fileMeta if it's generated (fix)
+
 ## 4.0.2
 
 ### Patch Changes
