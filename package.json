@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsup index.ts --format cjs,esm --dts",
     "release": "pnpm run build && changeset publish",
-    "lint": "tsc"
+    "lint": "tsc",
+    "test": "tsx --trace-warnings ./test.ts"
   },
   "dependencies": {
     "binary-parser": "^2.2.1",
@@ -19,7 +20,12 @@
   "devDependencies": {
     "@changesets/cli": "^2.26.2",
     "@types/events": "^3.0.0",
+    "@types/node": "^20.10.0",
+    "@types/yargs": "^17.0.34",
+    "sanitize-filename": "^1.6.3",
     "tsup": "^7.2.0",
-    "typescript": "^5.2.2"
+    "tsx": "^4.16.2",
+    "typescript": "^5.2.2",
+    "yargs": "^18.0.0"
   }
 }

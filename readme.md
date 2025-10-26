@@ -2,6 +2,22 @@
 
 Works in a browser context and Node.js v17.0.0 and later.
 
+# Testing
+
+Before running tests, you need the following:
+
+- Locally clone the repository
+- Install NodeJS >= v24.6.0
+- Run `npm i`
+
+To run tests, use:
+
+```bash
+$ npx tsx ./test.ts
+```
+
+Note: running this will print usage information. Add command line arguments to this to specify testing parameters.
+
 # API
 ```ts
 /**
