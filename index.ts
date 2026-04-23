@@ -206,20 +206,25 @@ export class SngStream {
       start: async controller => {
         if (fileMeta.contentsLen === BigInt(0)) {
           controller.close()
-        } else if (this.leftoverFileChunk) {
-          // The start of this file was read in the previous read() result; enqueue it now
-          const chunk = this.leftoverFileChunk
-          this.leftoverFileChunk = null
-          const { totalProcessedBytes, unmaskedChunk } = chunkUnmasker(chunk)
-
-          controller.enqueue(unmaskedChunk)
-          if (totalProcessedBytes >= fileMeta.contentsLen) {
-            controller.close()
-          }
         }
       },
       pull: async controller => {
         try {
+          // If the start of this file was read in the previous read() result,
+          // unmask and enqueue it now. Deferring this out of `start` means the
+          // XOR work is skipped entirely when a consumer cancels immediately
+          // after the `file` event (e.g. metadata-only scanners).
+          if (this.leftoverFileChunk) {
+            const chunk = this.leftoverFileChunk
+            this.leftoverFileChunk = null
+            const { totalProcessedBytes, unmaskedChunk } = chunkUnmasker(chunk)
+            controller.enqueue(unmaskedChunk)
+            if (totalProcessedBytes >= fileMeta.contentsLen) {
+              controller.close()
+            }
+            return
+          }
+
           const result = await this.reader.read()
 
           if (result.done) {
