@@ -280,35 +280,35 @@ export class SngStream {
   }
 }
 
+const metadataParser = new binaryParser.Parser()
+  .int32le('keyLen')
+  .string('key', { length: 'keyLen' })
+  .int32le('valueLen')
+  .string('value', { length: 'valueLen' })
+
+const fileMetaParser = new binaryParser.Parser()
+  .int8('filenameLen')
+  .string('filename', { length: 'filenameLen' })
+  .uint64le('contentsLen')
+  .uint64le('contentsIndex')
+
+const headerParser = new binaryParser.Parser()
+  .string('fileIdentifier', { length: 6, assert: 'SNGPKG' })
+  .uint32le('version')
+  .buffer('xorMask', { length: 16, clone: true })
+  .uint64le('metadataLen')
+  .uint64le('metadataCount')
+  .array('metadata', { length: 'metadataCount', type: metadataParser })
+  .uint64le('fileMetaLen')
+  .uint64le('fileMetaCount')
+  .array('fileMeta', { length: 'fileMetaCount', type: fileMetaParser })
+
 /**
  * @param sngBuffer The .sng file buffer.
  * @throws an exception if the .sng file is incorrectly formatted.
  * @returns A `SngHeader` object containing the .sng file's metadata.
  */
 function parseSngHeader(sngBuffer: Uint8Array) {
-  const metadataParser = new binaryParser.Parser()
-    .int32le('keyLen')
-    .string('key', { length: 'keyLen' })
-    .int32le('valueLen')
-    .string('value', { length: 'valueLen' })
-
-  const fileMetaParser = new binaryParser.Parser()
-    .int8('filenameLen')
-    .string('filename', { length: 'filenameLen' })
-    .uint64le('contentsLen')
-    .uint64le('contentsIndex')
-
-  const headerParser = new binaryParser.Parser()
-    .string('fileIdentifier', { length: 6, assert: 'SNGPKG' })
-    .uint32le('version')
-    .buffer('xorMask', { length: 16, clone: true })
-    .uint64le('metadataLen')
-    .uint64le('metadataCount')
-    .array('metadata', { length: 'metadataCount', type: metadataParser })
-    .uint64le('fileMetaLen')
-    .uint64le('fileMetaCount')
-    .array('fileMeta', { length: 'fileMetaCount', type: fileMetaParser })
-
   const header = headerParser.parse(sngBuffer)
   const metadata: { [key: string]: string } = {}
   for (const metaSection of header.metadata) {
