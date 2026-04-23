@@ -74,7 +74,9 @@ export class SngStream {
   private eventEmitter = new EventEmitter<SngStreamEvents>()
   private sngHeader: SngHeader | null = null
   private reader: ReadableStreamDefaultReader<Uint8Array>
-  private headerChunks: Uint8Array[] = []
+  /** Single growing buffer holding the header bytes accumulated so far. */
+  private headerBuffer: Uint8Array | null = null
+  private headerBufferedBytes = 0
 
   /** If a streamed chunk contains the end of one file and the start of the next file, the start of the next file is stored here. */
   private leftoverFileChunk: Uint8Array | null = null
@@ -112,28 +114,34 @@ export class SngStream {
           throw new Error('File ended before header could be parsed.')
         }
 
-        this.headerChunks.push(result.value)
+        this.appendHeaderChunk(result.value)
 
         const metadataLenOffset = 6 + 4 + 16
-        const metadataLen = readBigUint64LE(this.getHeaderBuffer(metadataLenOffset, 8))
+        const metadataLen = this.readHeaderBigUint64LE(metadataLenOffset)
 
         if (metadataLen === null) { continue } // Don't have metadataLen yet
 
         const fileMetaLenOffset = metadataLenOffset + 8 + Number(metadataLen)
-        const fileMetaLen = readBigUint64LE(this.getHeaderBuffer(fileMetaLenOffset, 8))
+        const fileMetaLen = this.readHeaderBigUint64LE(fileMetaLenOffset)
 
         if (fileMetaLen === null) { continue } // Don't have fileMetaLen yet
 
         const fileDataOffset = fileMetaLenOffset + 8 + Number(fileMetaLen) + 8 // Add 8 at the end for fileDataLen
-        const lastHeaderByte = this.getHeaderBuffer(fileDataOffset - 1, 1)
 
-        if (lastHeaderByte === null) { continue } // Don't have full header yet
+        if (this.headerBufferedBytes < fileDataOffset) { continue } // Don't have full header yet
 
         // Full header has been streamed in; parse it and begin streaming individual files
-        this.sngHeader = parseSngHeader(mergeUint8Arrays(...this.headerChunks))
+        const headerBuf = this.headerBuffer!
+        this.sngHeader = parseSngHeader(headerBuf.subarray(0, fileDataOffset))
+
         // Leave any leftover bytes for the next file in `leftoverFileChunk`
-        const lastChunkStartIndex = this.headerChunks.slice(0, -1).map(c => c.length).reduce((a, b) => a + b, 0)
-        this.leftoverFileChunk = this.getHeaderBuffer(fileDataOffset, (lastChunkStartIndex + result.value.length) - fileDataOffset)
+        const leftoverLen = this.headerBufferedBytes - fileDataOffset
+        this.leftoverFileChunk = leftoverLen > 0
+          ? headerBuf.slice(fileDataOffset, this.headerBufferedBytes)
+          : null
+
+        // Release the header buffer; parseSngHeader has already extracted all strings/xorMask.
+        this.headerBuffer = null
 
         const iniFileTextBuffer = generateIniFileText(this.sngHeader)
 
@@ -169,33 +177,26 @@ export class SngStream {
     }
   }
 
-  private getHeaderBuffer(startIndex: number, length: number) {
-    const bytes = new Uint8Array(length)
-    let [chunkStartIndex, writeIndex] = [0, 0]
-    for (const chunk of this.headerChunks) {
-      if (chunkStartIndex + chunk.length <= startIndex) {
-        chunkStartIndex += chunk.length
-        continue // skip if too early
-      }
-
-      if (chunkStartIndex >= startIndex + length) {
-        break // skip if too late
-      }
-
-      for (let i = 0; i < chunk.length; i++) {
-        if (chunkStartIndex + i >= startIndex && chunkStartIndex + i < startIndex + length) {
-          bytes[writeIndex] = chunk[i]
-          writeIndex++
-        }
-      }
-      chunkStartIndex += chunk.length
+  private appendHeaderChunk(chunk: Uint8Array) {
+    if (this.headerBuffer === null) {
+      this.headerBuffer = chunk
+      this.headerBufferedBytes = chunk.length
+      return
     }
-
-    if (writeIndex < length) {
-      return null // Bytes not available yet
-    } else {
-      return bytes
+    const newTotal = this.headerBufferedBytes + chunk.length
+    if (newTotal > this.headerBuffer.length) {
+      const newCap = Math.max(newTotal, this.headerBuffer.length * 2)
+      const grown = new Uint8Array(newCap)
+      grown.set(this.headerBuffer.subarray(0, this.headerBufferedBytes))
+      this.headerBuffer = grown
     }
+    this.headerBuffer.set(chunk, this.headerBufferedBytes)
+    this.headerBufferedBytes = newTotal
+  }
+
+  private readHeaderBigUint64LE(offset: number): bigint | null {
+    if (this.headerBuffer === null || this.headerBufferedBytes < offset + 8) { return null }
+    return new DataView(this.headerBuffer.buffer, this.headerBuffer.byteOffset + offset, 8).getBigUint64(0, true)
   }
 
   private async readFile(fileMeta: SngHeader['fileMeta'][number]) {
@@ -277,23 +278,6 @@ export class SngStream {
       return { totalProcessedBytes: chunkStartIndex, unmaskedChunk }
     }
   }
-}
-
-function readBigUint64LE(buffer: Uint8Array | null) {
-  if (buffer === null) { return null }
-  return new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength).getBigUint64(0, true)
-}
-
-function mergeUint8Arrays(...buffers: Uint8Array[]): Uint8Array {
-  const totalSize = buffers.reduce((acc, e) => acc + e.length, 0)
-  const merged = new Uint8Array(totalSize)
-
-  buffers.forEach((array, i, arrays) => {
-    const offset = arrays.slice(0, i).reduce((acc, e) => acc + e.length, 0)
-    merged.set(array, offset)
-  })
-
-  return merged
 }
 
 /**
