@@ -143,15 +143,12 @@ export class SngStream {
         // Release the header buffer; parseSngHeader has already extracted all strings/xorMask.
         this.headerBuffer = null
 
-        const iniFileTextBuffer = generateIniFileText(this.sngHeader)
-
         if (this.config.generateSongIni) {
+          const iniFileTextBuffer = generateIniFileText(this.sngHeader)
           this.sngHeader.fileMeta.unshift({ filename: 'song.ini', contentsIndex: BigInt(-1), contentsLen: BigInt(iniFileTextBuffer.length) })
-        }
 
-        this.eventEmitter.emit('header', this.sngHeader)
+          this.eventEmitter.emit('header', this.sngHeader)
 
-        if (this.config.generateSongIni) {
           await new Promise<void>(resolve => {
             this.eventEmitter.emit('file', 'song.ini', new ReadableStream<Uint8Array>({
               start: async controller => {
@@ -164,6 +161,8 @@ export class SngStream {
             this.readFile(this.sngHeader!.fileMeta[1])
           }
         } else {
+          this.eventEmitter.emit('header', this.sngHeader)
+
           if (this.sngHeader!.fileMeta.length > 0) {
             this.readFile(this.sngHeader!.fileMeta[0])
           }
