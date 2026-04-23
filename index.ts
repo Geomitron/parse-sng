@@ -322,6 +322,67 @@ function parseSngHeader(sngBuffer: Uint8Array) {
   return header as SngHeader
 }
 
+/**
+ * Reads just enough of `sngStream` to parse the .sng header, then
+ * cancels the source stream and returns the song.ini key/value data as
+ * a plain object (same shape `SngHeader.metadata` has on the full
+ * header). No file-content events are emitted and the file bytes
+ * following the header are never touched.
+ *
+ * Use this when you only need a file's metadata (e.g. to build a
+ * library index or scan song.ini data) — it avoids the per-file
+ * streaming setup that `SngStream` does.
+ *
+ * @throws if the stream ends before a full header has been read, or the
+ *   header bytes fail to parse.
+ */
+export async function readSongIni(sngStream: ReadableStream<Uint8Array>): Promise<{ [key: string]: string }> {
+  const reader = sngStream.getReader()
+  let buffer: Uint8Array | null = null
+  let buffered = 0
+
+  try {
+    while (true) {
+      const result = await reader.read()
+      if (result.done) {
+        throw new Error('File ended before header could be parsed.')
+      }
+
+      if (buffer === null) {
+        buffer = result.value
+        buffered = result.value.length
+      } else {
+        const newTotal = buffered + result.value.length
+        if (newTotal > buffer.length) {
+          const newCap = Math.max(newTotal, buffer.length * 2)
+          const grown = new Uint8Array(newCap)
+          grown.set(buffer.subarray(0, buffered))
+          buffer = grown
+        }
+        buffer.set(result.value, buffered)
+        buffered = newTotal
+      }
+
+      const metadataLenOffset = 6 + 4 + 16
+      if (buffered < metadataLenOffset + 8) { continue }
+      const metadataLen = new DataView(buffer.buffer, buffer.byteOffset + metadataLenOffset, 8).getBigUint64(0, true)
+
+      const fileMetaLenOffset = metadataLenOffset + 8 + Number(metadataLen)
+      if (buffered < fileMetaLenOffset + 8) { continue }
+      const fileMetaLen = new DataView(buffer.buffer, buffer.byteOffset + fileMetaLenOffset, 8).getBigUint64(0, true)
+
+      const fileDataOffset = fileMetaLenOffset + 8 + Number(fileMetaLen) + 8 // Add 8 at the end for fileDataLen
+      if (buffered < fileDataOffset) { continue }
+
+      const header = parseSngHeader(buffer.subarray(0, fileDataOffset))
+      return header.metadata
+    }
+  } finally {
+    try { reader.releaseLock() } catch {}
+    sngStream.cancel('Header read; source canceled.').catch(() => {})
+  }
+}
+
 function generateIniFileText(sngHeader: SngHeader | null) {
   const headerKeys = Object.keys(sngHeader?.metadata ?? {})
   if (!sngHeader || !headerKeys.length) { return new TextEncoder().encode('[song]\n') }
